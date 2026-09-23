@@ -1,0 +1,235 @@
+package tabwriter;
+
+use ecosystem::unicode_text;
+use std::text;
+
+pub enum WidthPolicy {
+    Bytes,
+    Terminal(unicode_text::WidthOptions),
+}
+
+pub struct Options {
+    pub min_width: isize,
+    pub padding: isize,
+    pub width: WidthPolicy,
+    pub max_buffer_bytes: isize,
+    pub max_output_bytes: isize,
+}
+
+impl Options {
+    pub fn new() -> Options {
+        Options {
+            min_width: 0,
+            padding: 1,
+            width: WidthPolicy::Bytes,
+            max_buffer_bytes: 1048576,
+            max_output_bytes: 16777216,
+        }
+    }
+
+    pub fn validate(self: Options) -> Result[(), string] {
+        if self.min_width < 0 || self.min_width > 4096 || self.padding < 0 || self.padding > 4096 {
+            return Result::Err("invalid tabwriter width or padding")
+        }
+        if self.max_buffer_bytes < 0 || self.max_output_bytes < 0 {
+            return Result::Err("invalid tabwriter limits")
+        }
+        Result::Ok(())
+    }
+}
+
+struct Row {
+    cells: Vec[string],
+    ending: string,
+}
+
+pub struct Writer {
+    options: Options,
+    rows: Vec[Row],
+    pending: Ref[string],
+    buffered: Ref[isize],
+    failed: Ref[bool],
+}
+
+fn measured_width(value: string, policy: WidthPolicy) -> isize {
+    match policy {
+        WidthPolicy::Bytes => value.byte_len(),
+        WidthPolicy::Terminal(options) => unicode_text::width_with(value, options),
+    }
+}
+
+fn split_cells(value: string) -> Vec[string] {
+    let cells = Vec::new();
+    let mut start = 0;
+    for index in 0..value.byte_len() {
+        if value.byte_get(index) == b'\t' {
+            cells.push(value.byte_slice(start, index));
+            start = index + 1;
+        }
+    }
+    cells.push(value.byte_slice(start, value.byte_len()));
+    cells
+}
+
+fn append_checked(output: text::StringBuilder, value: string, limit: isize) -> Result[(), string] {
+    if value.byte_len() > limit - output.len() {
+        return Result::Err("tabwriter output limit exceeded")
+    }
+    output.write_string(value);
+    Result::Ok(())
+}
+
+fn spaces(output: text::StringBuilder, count: isize, limit: isize) -> Result[(), string] {
+    if count > limit - output.len() {
+        return Result::Err("tabwriter output limit exceeded")
+    }
+    for _ in 0..count {
+        output.write_string(" ");
+    }
+    Result::Ok(())
+}
+
+impl Writer {
+    pub fn new(options: Options) -> Result[Writer, string] {
+        options.validate()?;
+        Result::Ok(
+            Writer {
+                options,
+                rows: Vec::new(),
+                pending: Ref::new(""),
+                buffered: Ref::new(0),
+                failed: Ref::new(false),
+            },
+        )
+    }
+
+    fn render(self: Writer, output: text::StringBuilder) -> Result[(), string] {
+        let widths: Vec[isize] = Vec::new();
+        for row in self.rows {
+            for index in 0..row.cells.len() - 1 {
+                while widths.len() <= index {
+                    widths.push(self.options.min_width);
+                }
+                let width = measured_width(row.cells[index], self.options.width);
+                if width > widths[index] {
+                    widths[index] = width;
+                }
+            }
+        }
+        for row in self.rows {
+            for index in 0..row.cells.len() {
+                append_checked(output, row.cells[index], self.options.max_output_bytes)?;
+                if index + 1 < row.cells.len() {
+                    let width = measured_width(row.cells[index], self.options.width);
+                    spaces(
+                        output,
+                        widths[index] - width + self.options.padding,
+                        self.options.max_output_bytes,
+                    )?;
+                }
+            }
+            append_checked(output, row.ending, self.options.max_output_bytes)?;
+        }
+        self.rows.clear();
+        self.buffered.set(0);
+        Result::Ok(())
+    }
+
+    fn line(self: Writer, value: string, ending: string, output: text::StringBuilder) -> Result[
+        (),
+        string,
+    ] {
+        if value.contains("\t") {
+            let size = value.byte_len() + ending.byte_len();
+            if size > self.options.max_buffer_bytes - self.buffered.get() {
+                return Result::Err("tabwriter buffer limit exceeded")
+            }
+            self.rows.push(Row { cells: split_cells(value), ending });
+            self.buffered.set(self.buffered.get() + size);
+        } else {
+            self.render(output)?;
+            append_checked(output, value, self.options.max_output_bytes)?;
+            append_checked(output, ending, self.options.max_output_bytes)?;
+        }
+        Result::Ok(())
+    }
+
+    fn process(self: Writer, chunk: string) -> Result[string, string] {
+        let input = self.pending.get() + chunk;
+        let output = text::StringBuilder::new();
+        let mut start = 0;
+        for index in 0..input.byte_len() {
+            if input.byte_get(index) == b'\n' {
+                let carriage = index > start && input.byte_get(index - 1) == b'\r';
+                let end = if carriage {
+                    index - 1
+                } else {
+                    index
+                };
+                self.line(
+                    input.byte_slice(start, end),
+                    if carriage {
+                        "\r\n"
+                    } else {
+                        "\n"
+                    },
+                    output,
+                )?;
+                start = index + 1;
+            }
+        }
+        let tail = input.byte_slice(start, input.byte_len());
+        if tail.byte_len() > self.options.max_buffer_bytes - self.buffered.get() {
+            return Result::Err("tabwriter buffer limit exceeded")
+        }
+        self.pending.set(tail);
+        Result::Ok(output.finish())
+    }
+
+    pub fn push(self: Writer, chunk: string) -> Result[string, string] {
+        if self.failed.get() {
+            return Result::Err("tabwriter failed")
+        }
+        match self.process(chunk) {
+            Ok(value) => Result::Ok(value),
+            Err(message) => {
+                self.failed.set(true);
+                Result::Err(message)
+            },
+        }
+    }
+
+    fn finish(self: Writer) -> Result[string, string] {
+        let output = text::StringBuilder::new();
+        let tail = self.pending.get();
+        if tail != "" {
+            self.pending.set("");
+            self.line(tail, "", output)?;
+        }
+        self.render(output)?;
+        Result::Ok(output.finish())
+    }
+
+    pub fn flush(self: Writer) -> Result[string, string] {
+        if self.failed.get() {
+            return Result::Err("tabwriter failed")
+        }
+        match self.finish() {
+            Ok(value) => Result::Ok(value),
+            Err(message) => {
+                self.failed.set(true);
+                Result::Err(message)
+            },
+        }
+    }
+}
+
+pub fn format(value: string, options: Options) -> Result[string, string] {
+    let writer = Writer::new(options)?;
+    let prefix = writer.push(value)?;
+    let suffix = writer.flush()?;
+    if suffix.byte_len() > options.max_output_bytes - prefix.byte_len() {
+        return Result::Err("tabwriter output limit exceeded")
+    }
+    Result::Ok(prefix + suffix)
+}

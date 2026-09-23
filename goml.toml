@@ -1,0 +1,5 @@
+[module]
+path = "ecosystem::tabwriter"
+
+[dependencies]
+"ecosystem::unicode_text" = "0.1.0"
