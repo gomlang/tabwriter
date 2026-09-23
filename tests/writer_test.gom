@@ -1,0 +1,77 @@
+package tests;
+
+use ecosystem::tabwriter;
+use ecosystem::unicode_text;
+use std::testing;
+
+#[test]
+fn streaming_alignment_waits_for_column_widths() -> () {
+    let writer = testing::expect_ok(tabwriter::Writer::new(tabwriter::Options::new()), "writer");
+    testing::assert_eq(testing::expect_ok(writer.push("a\tb\nlong"), "first chunk"), "");
+    testing::assert_eq(testing::expect_ok(writer.push("\tx\r"), "second chunk"), "");
+    testing::assert_eq(
+        testing::expect_ok(writer.push("\nplain\n"), "third chunk"),
+        "a    b\nlong x\r\nplain\n",
+    );
+    testing::assert_eq(testing::expect_ok(writer.flush(), "empty flush"), "");
+}
+
+#[test]
+fn flush_preserves_unterminated_tail_and_empty_cells() -> () {
+    let writer = testing::expect_ok(tabwriter::Writer::new(tabwriter::Options::new()), "writer");
+    testing::assert_eq(testing::expect_ok(writer.push("a\t\nbb\t"), "chunk"), "");
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "a  \nbb ");
+    testing::assert_eq(testing::expect_ok(writer.flush(), "repeat flush"), "");
+}
+
+#[test]
+fn width_policy_and_padding_are_explicit() -> () {
+    let byte_options = tabwriter::Options { min_width: 3, padding: 2, ..tabwriter::Options::new() };
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format("界\tx\na\ty\n", byte_options), "bytes"),
+        "界  x\na    y\n",
+    );
+    let terminal_options = tabwriter::Options {
+        width: tabwriter::WidthPolicy::Terminal(unicode_text::WidthOptions::new()),
+        ..byte_options,
+    };
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format("界\tx\na\ty\n", terminal_options), "terminal"),
+        "界   x\na    y\n",
+    );
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format("👩🏽‍💻\tx\na\ty", terminal_options), "emoji width"),
+        "👩🏽‍💻   x\na    y",
+    );
+}
+
+#[test]
+fn terminal_width_uses_complete_graphemes_across_chunks() -> () {
+    let options = tabwriter::Options {
+        width: tabwriter::WidthPolicy::Terminal(unicode_text::WidthOptions::new()),
+        ..tabwriter::Options::new(),
+    };
+    let writer = testing::expect_ok(tabwriter::Writer::new(options), "terminal writer");
+    testing::assert_eq(testing::expect_ok(writer.push("e"), "base"), "");
+    testing::assert_eq(testing::expect_ok(writer.push("́\tx\n中\ty\n"), "rest"), "");
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "é  x\n中 y\n");
+}
+
+#[test]
+fn limits_reject_unbounded_rows_and_output() -> () {
+    testing::assert_err(
+        tabwriter::Writer::new(tabwriter::Options { padding: -1, ..tabwriter::Options::new() }),
+    );
+    let small_buffer = tabwriter::Options { max_buffer_bytes: 4, ..tabwriter::Options::new() };
+    let writer = testing::expect_ok(tabwriter::Writer::new(small_buffer), "small writer");
+    testing::assert_err(writer.push("aa\tb\n"));
+    testing::assert_err(writer.flush());
+    let small_output = tabwriter::Options { max_output_bytes: 3, ..tabwriter::Options::new() };
+    testing::assert_err(tabwriter::format("a\tb\n", small_output));
+    testing::assert_err(
+        tabwriter::format(
+            "plain\na\tb",
+            tabwriter::Options { max_output_bytes: 6, ..tabwriter::Options::new() },
+        ),
+    );
+}
