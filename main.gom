@@ -1,0 +1,19 @@
+package main;
+
+use ecosystem::tabwriter;
+use std::testing;
+
+pub fn exercise() -> () {
+    let writer = testing::expect_ok(tabwriter::Writer::new(tabwriter::Options::new()), "writer");
+    testing::assert_eq(testing::expect_ok(writer.push("name\tcount\nlong\t"), "first"), "");
+    testing::assert_eq(
+        testing::expect_ok(writer.push("2\nend\n"), "second"),
+        "name count\nlong 2\nend\n",
+    );
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "");
+}
+
+fn main() -> () {
+    exercise();
+    println("tabwriter consumer: ok");
+}

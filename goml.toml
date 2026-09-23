@@ -1,0 +1,5 @@
+[module]
+path = "consumer::tabwriter"
+
+[dependencies]
+"ecosystem::tabwriter" = "0.1.0"
