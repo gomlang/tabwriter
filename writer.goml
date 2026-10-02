@@ -45,8 +45,8 @@ struct Row {
 
 pub struct Writer {
     options: Options,
-    rows: Vec[Row],
-    pending: text::StringBuilder,
+    rows: Ref[Vec[Row]],
+    pending: Ref[text::StringBuilder],
     buffered: Ref[isize],
     failed: Ref[bool],
 }
@@ -95,8 +95,8 @@ impl Writer {
         Result::Ok(
             Writer {
                 options,
-                rows: Vec::new(),
-                pending: text::StringBuilder::new(),
+                rows: Ref::new(Vec::new()),
+                pending: Ref::new(text::StringBuilder::new()),
                 buffered: Ref::new(0),
                 failed: Ref::new(false),
             },
@@ -105,7 +105,7 @@ impl Writer {
 
     fn render(self: Writer, output: text::StringBuilder) -> Result[(), string] {
         let widths: Vec[isize] = Vec::new();
-        for row in self.rows {
+        for row in self.rows.get() {
             for index in 0..row.cells.len() - 1 {
                 while widths.len() <= index {
                     widths.push(self.options.min_width);
@@ -116,7 +116,7 @@ impl Writer {
                 }
             }
         }
-        for row in self.rows {
+        for row in self.rows.get() {
             for index in 0..row.cells.len() {
                 append_checked(output, row.cells[index], self.options.max_output_bytes)?;
                 if index + 1 < row.cells.len() {
@@ -130,7 +130,7 @@ impl Writer {
             }
             append_checked(output, row.ending, self.options.max_output_bytes)?;
         }
-        self.rows.clear();
+        self.rows.get().clear();
         self.buffered.set(0);
         Result::Ok(())
     }
@@ -144,7 +144,7 @@ impl Writer {
             if size > self.options.max_buffer_bytes - self.buffered.get() {
                 return Result::Err("tabwriter buffer limit exceeded")
             }
-            self.rows.push(Row { cells: split_cells(value), ending });
+            self.rows.get().push(Row { cells: split_cells(value), ending });
             self.buffered.set(self.buffered.get() + size);
         } else {
             self.render(output)?;
@@ -160,12 +160,20 @@ impl Writer {
         for index in 0..chunk.byte_len() {
             if chunk.byte_get(index) == b'\n' {
                 let piece = chunk.byte_slice(start, index);
-                let value = if self.pending.is_empty() {
+                let value = if self.pending.get().is_empty() {
                     piece
                 } else {
-                    self.pending.write_string(piece);
-                    let value = self.pending.finish();
-                    self.pending.clear();
+                    let prefix = self.pending.get().finish();
+                    let size = prefix.byte_len() + piece.byte_len() + 1;
+                    if prefix.contains("\t") || piece.contains("\t") {
+                        if size > self.options.max_buffer_bytes - self.buffered.get() {
+                            return Result::Err("tabwriter buffer limit exceeded")
+                        }
+                    } else if size > self.options.max_output_bytes - output.len() {
+                        return Result::Err("tabwriter output limit exceeded")
+                    }
+                    let value = prefix + piece;
+                    self.pending.get().clear();
                     value
                 };
                 let carriage = value.ends_with("\r");
@@ -189,11 +197,18 @@ impl Writer {
         }
         let tail = chunk.byte_slice(start, chunk.byte_len());
         if tail.byte_len()
-            > self.options.max_buffer_bytes - self.buffered.get() - self.pending.len() {
+            > self.options.max_buffer_bytes - self.buffered.get() - self.pending.get().len() {
             return Result::Err("tabwriter buffer limit exceeded")
         }
-        self.pending.write_string(tail);
+        self.pending.get().write_string(tail);
         Result::Ok(output.finish())
+    }
+
+    fn fail(self: Writer) -> () {
+        self.failed.set(true);
+        self.rows.set(Vec::new());
+        self.pending.set(text::StringBuilder::new());
+        self.buffered.set(0);
     }
 
     pub fn push(self: Writer, chunk: string) -> Result[string, string] {
@@ -203,7 +218,7 @@ impl Writer {
         match self.process(chunk) {
             Ok(value) => Result::Ok(value),
             Err(message) => {
-                self.failed.set(true);
+                self.fail();
                 Result::Err(message)
             },
         }
@@ -211,9 +226,9 @@ impl Writer {
 
     fn finish(self: Writer) -> Result[string, string] {
         let output = text::StringBuilder::new();
-        let tail = self.pending.finish();
+        let tail = self.pending.get().finish();
         if tail != "" {
-            self.pending.clear();
+            self.pending.get().clear();
             self.line(tail, "", output)?;
         }
         self.render(output)?;
@@ -227,7 +242,7 @@ impl Writer {
         match self.finish() {
             Ok(value) => Result::Ok(value),
             Err(message) => {
-                self.failed.set(true);
+                self.fail();
                 Result::Err(message)
             },
         }

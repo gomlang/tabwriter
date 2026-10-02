@@ -24,7 +24,7 @@ fn main() -> () {
 The formatter buffers a complete tabbed block and any incomplete line. Incomplete
 lines append to a reusable byte buffer; each incoming chunk is scanned once,
 without rescanning or copying the entire retained prefix on every `push`. CRLF
-recognition works even when CR and LF arrive in different calls. A single unlimited tabbed block cannot be streamed with fixed alignment, so exceeding `max_buffer_bytes` returns an error. An error leaves the writer in a failed state; create a new writer before continuing. `format` is a convenience wrapper over `push` and `flush`. There is no native Go implementation or Go `text/tabwriter` API compatibility claim.
+recognition works even when CR and LF arrive in different calls. A single unlimited tabbed block cannot be streamed with fixed alignment, so exceeding `max_buffer_bytes` returns an error. When a fragment completes a retained line, tabbed-input and plain-output limits are checked before concatenating the retained prefix with the new piece. CRLF counts as two buffered bytes. An error releases retained rows and pending-line storage and leaves all copied writer handles in a failed state; create a new writer before continuing. `format` is a convenience wrapper over `push` and `flush`. There is no native Go implementation or Go `text/tabwriter` API compatibility claim.
 
 ## Development and examples
 
