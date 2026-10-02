@@ -1,0 +1,30 @@
+package tests;
+
+use ecosystem::tabwriter;
+use std::testing;
+
+#[test]
+fn completed_fragments_enforce_exact_crlf_buffer_and_output_limits() -> () {
+    let options = tabwriter::Options { max_buffer_bytes: 5, ..tabwriter::Options::new() };
+    let writer = testing::expect_ok(tabwriter::Writer::new(options), "writer");
+    testing::assert_eq(testing::expect_ok(writer.push("a\tb\r"), "partial CRLF"), "");
+    testing::assert_eq(testing::expect_ok(writer.push("\n"), "exact limit"), "");
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "a b\r\n");
+    let writer = testing::expect_ok(
+        tabwriter::Writer::new(tabwriter::Options { max_buffer_bytes: 4, ..options }),
+        "small writer",
+    );
+    testing::assert_ok(writer.push("a\tb\r"));
+    testing::assert_err(writer.push("\n"));
+    testing::assert_err(writer.flush());
+    testing::assert_err(writer.push("plain\n"));
+    let writer = testing::expect_ok(
+        tabwriter::Writer::new(tabwriter::Options { max_output_bytes: 5, ..options }),
+        "plain writer",
+    );
+    testing::assert_ok(writer.push("ab"));
+    testing::assert_eq(testing::expect_ok(writer.push("cd\n"), "plain exact limit"), "abcd\n");
+    testing::assert_ok(writer.push("a\t"));
+    testing::assert_err(writer.push("x".repeat(16384) + "\n"));
+    testing::assert_err(writer.flush());
+}
