@@ -75,3 +75,36 @@ fn limits_reject_unbounded_rows_and_output() -> () {
         ),
     );
 }
+
+#[test]
+fn chunk_boundaries_preserve_crlf_blocks_and_unterminated_tails() -> () {
+    let source = "a\tb\r\n界\tc\nplain\r\nx\ty";
+    let options = tabwriter::Options::new();
+    let expected = testing::expect_ok(tabwriter::format(source, options), "whole source");
+    for split in 0..source.len() + 1 {
+        if split < source.byte_len() && source.byte_get(split) & 0xc0 == 0x80 {
+            continue
+        }
+        let writer = testing::expect_ok(tabwriter::Writer::new(options), "split writer");
+        let prefix = source.byte_slice(0, split);
+        let suffix = source.byte_slice(split, source.byte_len());
+        let first = testing::expect_ok(writer.push(prefix), "prefix");
+        let second = testing::expect_ok(writer.push(suffix), "suffix");
+        testing::assert_eq(first + second + testing::expect_ok(writer.flush(), "flush"), expected);
+    }
+    let writer = testing::expect_ok(
+        tabwriter::Writer::new(tabwriter::Options { max_buffer_bytes: 8192, ..options }),
+        "fragmented writer",
+    );
+    for _ in 0..8192 {
+        testing::assert_eq(testing::expect_ok(writer.push("x"), "one byte"), "");
+    }
+    testing::assert_eq(
+        testing::expect_ok(writer.push("\n"), "completed line"),
+        "x".repeat(8192) + "\n",
+    );
+    testing::assert_eq(testing::expect_ok(writer.flush(), "empty flush"), "");
+    testing::assert_eq(testing::expect_ok(writer.push("a\tb\n"), "block"), "");
+    testing::assert_err(writer.push("x".repeat(8189)));
+    testing::assert_err(writer.flush());
+}

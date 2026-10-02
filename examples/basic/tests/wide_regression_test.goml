@@ -1,0 +1,17 @@
+package tests;
+
+use ecosystem::tabwriter;
+use std::testing;
+
+#[test]
+fn imported_writer_handles_fragmented_crlf_and_reuse() -> () {
+    let writer = testing::expect_ok(tabwriter::Writer::new(tabwriter::Options::new()), "writer");
+    for part in["a", "\t", "x", "\r", "\n", "bb", "\t", "y", "\r"] {
+        testing::assert_eq(testing::expect_ok(writer.push(part), "fragment"), "");
+    }
+    testing::assert_eq(
+        testing::expect_ok(writer.push("\nplain\n"), "boundary"),
+        "a  x\r\nbb y\r\nplain\n",
+    );
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "");
+}

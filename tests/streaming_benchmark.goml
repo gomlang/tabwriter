@@ -1,0 +1,26 @@
+package tests;
+
+use ecosystem::tabwriter;
+use std::testing;
+use std::time;
+
+#[test]
+#[ignore]
+fn fragmented_line_scaling() -> () {
+    for size in[8192, 16384] {
+        let started = time::Instant::now();
+        for _ in 0..3 {
+            let writer = testing::expect_ok(
+                tabwriter::Writer::new(tabwriter::Options::new()),
+                "benchmark writer",
+            );
+            for _ in 0..size {
+                testing::assert_eq(testing::expect_ok(writer.push("x"), "fragment"), "");
+            }
+            testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "x".repeat(size));
+        }
+        println(
+            f"fragmented line {size} bytes, three runs: {started.elapsed().as_milliseconds()} ms",
+        );
+    }
+}
