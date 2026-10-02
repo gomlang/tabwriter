@@ -1,6 +1,6 @@
 package tests;
 
-use consumer::tabwriter as application;
+use ecosystem::tabwriter::examples::basic as application;
 
 #[test]
 fn imported_tabwriter() -> () {
