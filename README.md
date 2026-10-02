@@ -7,7 +7,7 @@
 "ecosystem::tabwriter" = "0.1.0"
 ```
 
-```gom
+```goml
 use ecosystem::tabwriter;
 
 fn main() -> () {
@@ -25,7 +25,7 @@ The formatter buffers a complete tabbed block and any incomplete line. A single 
 
 ## Development and examples
 
-Requires GoML 0.1.55 or newer. The `examples/basic/` example shares the root manifest. From the library root, run:
+Requires GoML 0.1.56 or newer. The `examples/basic/` example shares the root manifest. From the library root, run:
 
 ```sh
 goml run --example basic
