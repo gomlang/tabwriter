@@ -21,6 +21,18 @@ fn main() -> () {
 
 `Options::new()` uses byte width, zero minimum width, one padding space, a 1 MiB buffered-input limit, and a 16 MiB output limit per `push` or `flush` call. `WidthPolicy::Terminal(unicode_text::WidthOptions)` instead measures grapheme display columns using the documented Unicode terminal policy. That policy does not parse ANSI control sequences or simulate tab stops. The byte policy counts UTF-8 bytes. Both policies preserve the original cell content. Width and padding are limited to 4096 columns; negative limits are rejected.
 
+`Writer::with_alignment(options, alignments)` selects `Alignment::Left` or
+`Alignment::Right` by zero-based column index. Unspecified columns are left
+aligned. Right alignment adds spaces before the cell; the configured `padding`
+still separates nonfinal columns. An explicitly right-aligned final column
+participates in width measurement and receives leading spaces only. A final
+left-aligned column keeps its original text without padding. Plain lines remain
+block boundaries. Ragged rows do not create missing cells. The writer copies
+the alignment vector, so changing it later cannot affect pending output.
+`format_aligned(text, options, alignments)` provides the same behavior as a
+one-shot call. Width policies, limits, line endings and failure state apply to
+both constructors; `Writer::new` and `format` retain their existing defaults.
+
 The formatter buffers a complete tabbed block and any incomplete line. Incomplete
 lines append to a reusable byte buffer; each incoming chunk is scanned once,
 without rescanning or copying the entire retained prefix on every `push`. CRLF

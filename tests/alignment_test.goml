@@ -1,0 +1,109 @@
+package tests;
+
+use ecosystem::tabwriter::{Alignment, Options, Writer, WidthPolicy};
+use ecosystem::tabwriter;
+use ecosystem::unicode_text;
+use std::testing;
+
+#[test]
+fn numeric_final_columns_align_right_without_trailing_padding() -> () {
+    let input = "name\tcount\nlong-name\t2\nshort\t123\n";
+    let alignments = Vec::from_array([Alignment::Left, Alignment::Right]);
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format_aligned(input, Options::new(), alignments), "table"),
+        "name      count\nlong-name     2\nshort       123\n",
+    );
+    let expected = testing::expect_ok(tabwriter::format(input, Options::new()), "legacy");
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format_aligned(input, Options::new(), Vec::new()), "empty"),
+        expected,
+    );
+    testing::assert_eq(
+        testing::expect_ok(
+            tabwriter::format_aligned(
+                input,
+                Options::new(),
+                Vec::from_array([Alignment::Left, Alignment::Left]),
+            ),
+            "left",
+        ),
+        expected,
+    );
+}
+
+#[test]
+fn right_alignment_handles_ragged_rows_empty_cells_and_width_policy() -> () {
+    let options = Options {
+        min_width: 3,
+        padding: 2,
+        width: WidthPolicy::Terminal(unicode_text::WidthOptions::new()),
+        ..Options::new(),
+    };
+    let alignments = Vec::from_array([Alignment::Right, Alignment::Right, Alignment::Right]);
+    testing::assert_eq(
+        testing::expect_ok(
+            tabwriter::format_aligned("界\tx\tz\na\tyy\n\t\n", options, alignments),
+            "ragged",
+        ),
+        " 界    x    z\n  a   yy\n        \n",
+    );
+    let bytes = Options { width: WidthPolicy::Bytes, ..options };
+    testing::assert_eq(
+        testing::expect_ok(
+            tabwriter::format_aligned("界\tx\na\ty\n", bytes, Vec::from_array([Alignment::Right])),
+            "bytes",
+        ),
+        "界  x\n  a  y\n",
+    );
+}
+
+#[test]
+fn alignment_snapshot_survives_fragmentation_and_block_boundaries() -> () {
+    let input = "a\t1\r\nlong\t20\r\nplain\r\nx\t3";
+    let expected = "a     1\r\nlong 20\r\nplain\r\nx 3";
+    for split in 0..input.byte_len() + 1 {
+        let alignments = Vec::from_array([Alignment::Left, Alignment::Right]);
+        let writer = testing::expect_ok(
+            Writer::with_alignment(Options::new(), alignments),
+            "writer",
+        );
+        alignments[1] = Alignment::Left;
+        let first = testing::expect_ok(writer.push(input.byte_slice(0, split)), "first");
+        let second = testing::expect_ok(
+            writer.push(input.byte_slice(split, input.byte_len())),
+            "second",
+        );
+        testing::assert_eq(first + second + testing::expect_ok(writer.flush(), "flush"), expected);
+        testing::assert_eq(testing::expect_ok(writer.flush(), "again"), "");
+    }
+}
+
+#[test]
+fn alignment_padding_counts_towards_exact_output_limit_and_failure_is_shared() -> () {
+    let alignments = Vec::from_array([Alignment::Left, Alignment::Right]);
+    let input = "a\t1\nb\t100\n";
+    let expected = "a   1\nb 100\n";
+    testing::assert_eq(
+        testing::expect_ok(
+            tabwriter::format_aligned(
+                input,
+                Options { max_output_bytes: expected.byte_len(), ..Options::new() },
+                alignments,
+            ),
+            "exact",
+        ),
+        expected,
+    );
+    let writer = testing::expect_ok(
+        Writer::with_alignment(
+            Options { max_output_bytes: expected.byte_len() - 1, ..Options::new() },
+            alignments,
+        ),
+        "limited",
+    );
+    let alias = writer;
+    testing::assert_ok(writer.push(input));
+    testing::assert_err(writer.flush());
+    testing::assert_err(alias.push("new\n"));
+    testing::assert_err(alias.flush());
+}

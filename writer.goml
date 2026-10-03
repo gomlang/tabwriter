@@ -8,6 +8,12 @@ pub enum WidthPolicy {
     Terminal(unicode_text::WidthOptions),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Alignment {
+    Left,
+    Right,
+}
+
 pub struct Options {
     pub min_width: isize,
     pub padding: isize,
@@ -45,6 +51,7 @@ struct Row {
 
 pub struct Writer {
     options: Options,
+    alignments: Vec[Alignment],
     rows: Ref[Vec[Row]],
     pending: Ref[text::StringBuilder],
     buffered: Ref[isize],
@@ -91,10 +98,15 @@ fn spaces(output: text::StringBuilder, count: isize, limit: isize) -> Result[(),
 
 impl Writer {
     pub fn new(options: Options) -> Result[Writer, string] {
+        Writer::with_alignment(options, Vec::new())
+    }
+
+    pub fn with_alignment(options: Options, alignments: Vec[Alignment]) -> Result[Writer, string] {
         options.validate()?;
         Result::Ok(
             Writer {
                 options,
+                alignments: alignments.copy(),
                 rows: Ref::new(Vec::new()),
                 pending: Ref::new(text::StringBuilder::new()),
                 buffered: Ref::new(0),
@@ -103,10 +115,17 @@ impl Writer {
         )
     }
 
+    fn right_aligned(self: Writer, column: isize) -> bool {
+        column < self.alignments.len() && self.alignments[column] == Alignment::Right
+    }
+
     fn render(self: Writer, output: text::StringBuilder) -> Result[(), string] {
         let widths: Vec[isize] = Vec::new();
         for row in self.rows.get() {
-            for index in 0..row.cells.len() - 1 {
+            for index in 0..row.cells.len() {
+                if index + 1 == row.cells.len() && !self.right_aligned(index) {
+                    continue
+                }
                 while widths.len() <= index {
                     widths.push(self.options.min_width);
                 }
@@ -118,12 +137,24 @@ impl Writer {
         }
         for row in self.rows.get() {
             for index in 0..row.cells.len() {
+                let right = self.right_aligned(index);
+                let extra = if index + 1 < row.cells.len() || right {
+                    widths[index] - measured_width(row.cells[index], self.options.width)
+                } else {
+                    0
+                };
+                if right {
+                    spaces(output, extra, self.options.max_output_bytes)?;
+                }
                 append_checked(output, row.cells[index], self.options.max_output_bytes)?;
                 if index + 1 < row.cells.len() {
-                    let width = measured_width(row.cells[index], self.options.width);
                     spaces(
                         output,
-                        widths[index] - width + self.options.padding,
+                        if right {
+                            self.options.padding
+                        } else {
+                            extra + self.options.padding
+                        },
                         self.options.max_output_bytes,
                     )?;
                 }
@@ -250,7 +281,14 @@ impl Writer {
 }
 
 pub fn format(value: string, options: Options) -> Result[string, string] {
-    let writer = Writer::new(options)?;
+    format_aligned(value, options, Vec::new())
+}
+
+pub fn format_aligned(value: string, options: Options, alignments: Vec[Alignment]) -> Result[
+    string,
+    string,
+] {
+    let writer = Writer::with_alignment(options, alignments)?;
     let prefix = writer.push(value)?;
     let suffix = writer.flush()?;
     if suffix.byte_len() > options.max_output_bytes - prefix.byte_len() {

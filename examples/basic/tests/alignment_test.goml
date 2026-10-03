@@ -1,0 +1,15 @@
+package tests;
+
+use ecosystem::tabwriter::{Alignment, Options, Writer};
+use std::testing;
+
+#[test]
+fn downstream_streams_right_aligned_quantity_column() -> () {
+    let writer = testing::expect_ok(
+        Writer::with_alignment(Options::new(), Vec::from_array([Alignment::Left, Alignment::Right])),
+        "table",
+    );
+    testing::assert_eq(testing::expect_ok(writer.push("apple\t2\n"), "row"), "");
+    testing::assert_eq(testing::expect_ok(writer.push("pear\t12\n"), "row"), "");
+    testing::assert_eq(testing::expect_ok(writer.flush(), "flush"), "apple  2\npear  12\n");
+}
