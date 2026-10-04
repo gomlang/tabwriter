@@ -8,12 +8,22 @@
 ```
 
 ```goml
+package main;
+
 use ecosystem::tabwriter;
+use std::panic;
+
+fn print_table() -> Result[(), string] {
+    let writer = tabwriter::Writer::new(tabwriter::Options::new())?;
+    print(writer.push("name\tcount\nlong\t2\n")?);
+    print(writer.flush()?);
+    Result::Ok(())
+}
 
 fn main() -> () {
-    let writer = tabwriter::Writer::new(tabwriter::Options::new()).unwrap();
-    print(writer.push("name\tcount\nlong\t2\n").unwrap());
-    print(writer.flush().unwrap());
+    if let Err(message) = print_table() {
+        panic::raise(message);
+    }
 }
 ```
 
