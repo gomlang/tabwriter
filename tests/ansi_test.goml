@@ -1,0 +1,63 @@
+package tests;
+
+use ecosystem::tabwriter;
+use ecosystem::tabwriter::{Alignment, Options, Writer, WidthPolicy};
+use ecosystem::unicode_text;
+use std::testing;
+
+fn ansi_options() -> Options {
+    Options { width: WidthPolicy::Ansi(unicode_text::WidthOptions::new()), ..Options::new() }
+}
+
+#[test]
+fn ansi_styles_do_not_change_grapheme_width_across_fragments() -> () {
+    let input = "\u001b[31m界\u001b[0m\t1\n👩‍💻\t22\ne\u001b[1ḿ\u001b[0m\t3\n";
+    let expected = "\u001b[31m界\u001b[0m  1\n👩‍💻 22\ne\u001b[1ḿ\u001b[0m   3\n";
+    let align = Vec::from_array([Alignment::Left, Alignment::Right]);
+    testing::assert_eq(
+        testing::expect_ok(tabwriter::format_aligned(input, ansi_options(), align), "format"),
+        expected,
+    );
+    for split in 0..input.byte_len() + 1 {
+        if !input.is_char_boundary(split) {
+            continue;
+        }
+        let writer = testing::expect_ok(Writer::with_alignment(ansi_options(), align), "writer");
+        let a = testing::expect_ok(writer.push(input.byte_slice(0, split)), "first");
+        let b = testing::expect_ok(writer.push(input.byte_slice(split, input.byte_len())), "second");
+        testing::assert_eq(a + b + testing::expect_ok(writer.flush(), "flush"), expected);
+    }
+    testing::assert_ok(
+        tabwriter::format_aligned(
+            input,
+            Options { max_output_bytes: expected.byte_len(), ..ansi_options() },
+            align,
+        ),
+    );
+    testing::assert_err(
+        tabwriter::format_aligned(
+            input,
+            Options { max_output_bytes: expected.byte_len() - 1, ..ansi_options() },
+            align,
+        ),
+    );
+}
+
+#[test]
+fn ansi_rejects_unknown_truncated_and_nonstyle_controls_and_latches_failure() -> () {
+    for bad in Vec::from_array(
+        ["\u001b[", "\u001b[2J", "\u001b]8;;https://example.com\u0007", "x\u0008"],
+    ) {
+        testing::assert_err(tabwriter::format(bad + "\tx\n", ansi_options()));
+        testing::assert_err(tabwriter::format(bad + "\n", ansi_options()));
+        testing::assert_err(tabwriter::format(bad, ansi_options()));
+    }
+    testing::assert_ok(tabwriter::format("\u001b[999mx\t1", ansi_options()));
+    let writer = testing::expect_ok(Writer::new(ansi_options()), "writer");
+    testing::assert_ok(writer.push("\u001b["));
+    testing::assert_err(writer.flush());
+    testing::assert_err(writer.push("31m"));
+    testing::assert_err(
+        tabwriter::format("\u001b[31mabc\t1", Options { max_buffer_bytes: 3, ..ansi_options() }),
+    );
+}

@@ -63,3 +63,16 @@ goml test
 For an opt-in fragmented-line scaling measurement, run
 `goml test --ignored --nocapture fragmented_line_scaling`. It reports three
 complete runs at 8 KiB and 16 KiB without imposing timing thresholds.
+
+`WidthPolicy::Ansi(WidthOptions::new())` measures visible grapheme clusters while
+preserving the original SGR escape bytes. Styling between a base character and
+combining marks does not break width calculation. Both alignment directions and
+fragments split inside escape sequences are supported; cells are validated after
+a complete line arrives or on flush. This strict policy accepts only text and
+supported SGR styles: cursor controls, OSC (including hyperlinks), other controls,
+and truncated sequences are errors. Unknown numeric SGR parameters follow the
+ANSI parser policy: they are preserved and have zero visible width. Sequences cannot span
+cells or lines. No automatic reset is inserted; callers own style scope. Plain
+`Bytes` and `Terminal` policies remain unchanged. ANSI parser limits (including
+1 MiB per cell and 8192 bytes per escape sequence), buffer and output budgets all
+apply, counting original escape bytes toward byte budgets.

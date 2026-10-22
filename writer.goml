@@ -1,11 +1,13 @@
 package tabwriter;
 
 use ecosystem::unicode_text;
+use ecosystem::ansi;
 use std::text;
 
 pub enum WidthPolicy {
     Bytes,
     Terminal(unicode_text::WidthOptions),
+    Ansi(unicode_text::WidthOptions),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,10 +60,26 @@ pub struct Writer {
     failed: Ref[bool],
 }
 
-fn measured_width(value: string, policy: WidthPolicy) -> isize {
+fn measured_width(value: string, policy: WidthPolicy) -> Result[isize, string] {
     match policy {
-        WidthPolicy::Bytes => value.byte_len(),
-        WidthPolicy::Terminal(options) => unicode_text::width_with(value, options),
+        WidthPolicy::Bytes => Result::Ok(value.byte_len()),
+        WidthPolicy::Terminal(options) => Result::Ok(unicode_text::width_with(value, options)),
+        WidthPolicy::Ansi(options) => {
+            let visible = text::StringBuilder::new();
+            let mut style = ansi::Style::new();
+            for token in ansi::parse_tokens(value).map_err(|error| error.to_string())? {
+                match token {
+                    Text(text) => visible.write_string(text),
+                    Csi { parameters, intermediates, final_byte: 109 } if intermediates == "" => {
+                        style = ansi::apply_sgr(style, parameters).map_err(
+                            |error| error.to_string(),
+                        )?;
+                    },
+                    _ => return Result::Err("tabwriter ANSI width accepts only text and SGR styles"),
+                }
+            }
+            Result::Ok(unicode_text::width_with(visible.finish(), options))
+        },
     }
 }
 
@@ -129,7 +147,7 @@ impl Writer {
                 while widths.len() <= index {
                     widths.push(self.options.min_width);
                 }
-                let width = measured_width(row.cells[index], self.options.width);
+                let width = measured_width(row.cells[index], self.options.width)?;
                 if width > widths[index] {
                     widths[index] = width;
                 }
@@ -139,7 +157,7 @@ impl Writer {
             for index in 0..row.cells.len() {
                 let right = self.right_aligned(index);
                 let extra = if index + 1 < row.cells.len() || right {
-                    widths[index] - measured_width(row.cells[index], self.options.width)
+                    widths[index] - measured_width(row.cells[index], self.options.width)?
                 } else {
                     0
                 };
@@ -170,6 +188,11 @@ impl Writer {
         (),
         string,
     ] {
+        if let WidthPolicy::Ansi(_) = self.options.width {
+            for cell in split_cells(value) {
+                measured_width(cell, self.options.width)?;
+            }
+        }
         if value.contains("\t") {
             let size = value.byte_len() + ending.byte_len();
             if size > self.options.max_buffer_bytes - self.buffered.get() {

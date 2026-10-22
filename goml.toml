@@ -3,3 +3,4 @@ path = "ecosystem::tabwriter"
 
 [dependencies]
 "ecosystem::unicode_text" = true
+"ecosystem::ansi" = true
